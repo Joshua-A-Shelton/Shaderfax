@@ -35,7 +35,7 @@ enum GeometryPipelineType
 };
 
 
-bool getModules(std::vector<IModule*>& graphicsModules,std::vector<IModule*>& computeModules,std::filesystem::path& root,Slang::ComPtr<ISession>& session);
+bool getModules(std::vector<IModule*>& modules,std::filesystem::path& root,Slang::ComPtr<ISession>& session);
 bool isSameShaderType(ShaderType& existingType, ShaderType comparisonType, GeometryPipelineType& existingPipeline, GeometryPipelineType comparisonPipeline, const std::filesystem::path& currentFile);
 bool isValidColorTarget(const std::string& colorTarget);
 bool isValidDepthTarget(const std::string & depthTarget);
@@ -111,19 +111,18 @@ int main(int argc, char**argv)
 
     Slang::ComPtr<ISession> session;
     globalSession->createSession(sessionDesc, session.writeRef());
-    std::vector<IModule*> graphicsModules;
-    std::vector<IModule*> computeModules;
+    std::vector<IModule*> modules;
 
-    auto success = getModules(graphicsModules,computeModules,root,session);
+    auto success = getModules(modules,root,session);
     if (!success)
     {
         return EXIT_FAILURE;
     }
 
     std::unordered_map<std::string,std::vector<ShaderOutData>> shaderWriteData;
-    for (auto i=0; i< graphicsModules.size(); i++)
+    for (auto i=0; i< modules.size(); i++)
     {
-        auto module = graphicsModules[i];
+        auto module = modules[i];
         std::filesystem::path file = module->getFilePath();
         file = absolute(file);
         auto relative = std::filesystem::relative(file,root).replace_extension(".cshdr");
@@ -332,7 +331,7 @@ int main(int argc, char**argv)
     return 0;
 }
 
-bool getModules(std::vector<IModule*>& graphicsModules,std::vector<IModule*>& computeModules,std::filesystem::path& root,Slang::ComPtr<ISession>& session)
+bool getModules(std::vector<IModule*>& modules,std::filesystem::path& root,Slang::ComPtr<ISession>& session)
 {
     using recursive_directory_iterator = std::filesystem::recursive_directory_iterator;
     for (const auto& dirEntry : recursive_directory_iterator(root))
@@ -371,13 +370,9 @@ bool getModules(std::vector<IModule*>& graphicsModules,std::vector<IModule*>& co
                         std::cerr << path << " contains both compute and graphics entry points\n";
                         return false;
                     }
-                    else if (graphics)
+                    else
                     {
-                        graphicsModules.push_back(module);
-                    }
-                    else if (compute)
-                    {
-                        computeModules.push_back(module);
+                        modules.push_back(module);
                     }
                 }
 
