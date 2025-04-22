@@ -63,6 +63,17 @@ struct ShaderOutData
     Slang::ComPtr<IBlob> spirvCode=nullptr;
 };
 
+void removeFilesOfType(const std::filesystem::path& dir, const std::string& extension) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == extension) {
+            try {
+                std::filesystem::remove(entry.path());
+            } catch (const std::filesystem::filesystem_error& e) {
+            }
+        }
+    }
+}
+
 int main(int argc, char**argv)
 {
     po::options_description desc("Allowed options");
@@ -94,6 +105,7 @@ int main(int argc, char**argv)
     const char* rootPath = absRoot.c_str();
     TargetDesc targetDesc{};
     targetDesc.format = SLANG_SPIRV;
+
 
     SessionDesc sessionDesc{};
     sessionDesc.targets = &targetDesc;
@@ -252,14 +264,14 @@ int main(int argc, char**argv)
             if (diagnostics != nullptr)
             {
                 std::cerr<<(char*)diagnostics->getBufferPointer()<<"\n";
-                return EXIT_FAILURE;
+                //return EXIT_FAILURE;
             }
             diagnostics = nullptr;
             stages.push_back({.stage = stageName,.parameters = std::move(parameters),.spirvCode = spirv});
         }
 
     }
-    std::filesystem::remove_all(output);
+    removeFilesOfType(output,".cshdr");
     std::filesystem::create_directory(output);
     for (auto& kvpair: shaderWriteData)
     {
