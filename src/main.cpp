@@ -261,10 +261,13 @@ int main(int argc, char**argv)
             Slang::ComPtr<IBlob> spirv = nullptr;
             diagnostics = nullptr;
             componentType->getTargetCode(0,spirv.writeRef(),diagnostics.writeRef());
-            if (diagnostics != nullptr)
+            if (spirv.get() == nullptr)
             {
-                std::cerr<<(char*)diagnostics->getBufferPointer()<<"\n";
-                //return EXIT_FAILURE;
+                if (diagnostics.get())
+                {
+                    std::cerr<<(char*)diagnostics->getBufferPointer()<<"\n";
+                }
+                return EXIT_FAILURE;
             }
             diagnostics = nullptr;
             stages.push_back({.stage = stageName,.parameters = std::move(parameters),.spirvCode = spirv});
