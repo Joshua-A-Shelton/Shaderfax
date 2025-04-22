@@ -7,6 +7,7 @@
 #include <slang.h>
 #include <vector>
 #include <boost/program_options.hpp>
+#include <boost/endian/conversion.hpp>
 using namespace slang;
 namespace po = boost::program_options;
 
@@ -242,7 +243,7 @@ int main(int argc, char**argv)
             entryPoint->link(componentType.writeRef(),diagnostics.writeRef());
             if (diagnostics.get())
             {
-                std::cerr<<"Compilation failed: "<<file<<"\n";
+                std::cerr<<(char*)diagnostics->getBufferPointer()<<"\n";
                 return EXIT_FAILURE;
             }
             Slang::ComPtr<IBlob> spirv = nullptr;
@@ -250,7 +251,7 @@ int main(int argc, char**argv)
             componentType->getTargetCode(0,spirv.writeRef(),diagnostics.writeRef());
             if (diagnostics != nullptr)
             {
-                std::cerr<<"Compilation failed: "<<file<<"\n";
+                std::cerr<<(char*)diagnostics->getBufferPointer()<<"\n";
                 return EXIT_FAILURE;
             }
             diagnostics = nullptr;
@@ -297,7 +298,7 @@ int main(int argc, char**argv)
             uint32_t bufferSize = stage.spirvCode->getBufferSize();
             if constexpr (std::endian::native == std::endian::big)
             {
-                bufferSize = _byteswap_ulong(bufferSize);
+                boost::endian::little_to_native_inplace(bufferSize);
             }
             char* location = (char*)&bufferSize;
             for (auto byte=0; byte<sizeof(bufferSize); ++byte)
@@ -339,11 +340,12 @@ bool getModules(std::vector<IModule*>& modules,std::filesystem::path& root,Slang
         if (dirEntry.is_regular_file())
         {
             auto path = dirEntry.path();
+            path = std::filesystem::relative(path, root);
             if (path.extension() == ".slang")
             {
                 Slang::ComPtr<IBlob> diagnostics;
                 IModule* module = session->loadModule(path.string().c_str(),diagnostics.writeRef());
-                if (module->getDefinedEntryPointCount())
+                if (module && module->getDefinedEntryPointCount())
                 {
                     bool compute = false;
                     bool graphics = false;
@@ -378,7 +380,7 @@ bool getModules(std::vector<IModule*>& modules,std::filesystem::path& root,Slang
 
                 if (diagnostics)
                 {
-                    std::cerr << diagnostics->getBufferPointer() << std::endl;
+                    std::cerr << (char*)diagnostics->getBufferPointer() << std::endl;
                     return false;
                 }
             }
