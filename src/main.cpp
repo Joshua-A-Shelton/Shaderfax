@@ -227,7 +227,7 @@ int main(int argc, char**argv)
                     break;
                 case SLANG_STAGE_AMPLIFICATION:
                     if (!isSameShaderType(currentType,ShaderType::RAY,pipelineType,GeometryPipelineType::MESH,module->getFilePath())){return EXIT_FAILURE;}
-                    stageName = "amplification";
+                    stageName = "task";
                     parameters = getAmplificationParameters(reflection);
                     break;
                 default:
