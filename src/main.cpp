@@ -107,6 +107,12 @@ int main(int argc, char**argv)
     targetDesc.format = SLANG_SPIRV;
 
 
+    CompilerOptionEntry compilerOptions[]
+    {
+        CompilerOptionEntry(CompilerOptionName::PreserveParameters,CompilerOptionValue(CompilerOptionValueKind::Int,true)),
+        CompilerOptionEntry(CompilerOptionName::EmitReflectionJSON,CompilerOptionValue(CompilerOptionValueKind::Int,true))
+    };
+
     SessionDesc sessionDesc{};
     sessionDesc.targets = &targetDesc;
     sessionDesc.targetCount = 1;
@@ -119,7 +125,8 @@ int main(int argc, char**argv)
     sessionDesc.fileSystem = nullptr;
     sessionDesc.enableEffectAnnotations = false;
     sessionDesc.enableEffectAnnotations = false;
-
+    sessionDesc.compilerOptionEntries = compilerOptions;
+    sessionDesc.compilerOptionEntryCount = sizeof(compilerOptions)/sizeof(CompilerOptionEntry);
 
 
     Slang::ComPtr<ISession> session;
