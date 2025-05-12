@@ -18,5 +18,8 @@ find_package(slang REQUIRED)
 
 find_package(Boost REQUIRED COMPONENTS program_options)
 
-add_executable(Shaderfax src/main.cpp)
+add_executable(Shaderfax src/main.cpp
+        src/DescriptorSet.cpp
+        src/DescriptorSet.h
+        src/Texel.h)
 target_link_libraries(Shaderfax PUBLIC slang Boost::program_options)

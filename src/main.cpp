@@ -8,6 +8,9 @@
 #include <vector>
 #include <boost/program_options.hpp>
 #include <boost/endian/conversion.hpp>
+
+#include "DescriptorSet.h"
+#include "Texel.h"
 using namespace slang;
 namespace po = boost::program_options;
 
@@ -63,6 +66,12 @@ struct ShaderOutData
     Slang::ComPtr<IBlob> spirvCode=nullptr;
 };
 
+struct ShaderFileData
+{
+    std::vector<ShaderOutData> shaderOutData;
+    std::vector<DescriptorSet> descriptorSets;
+};
+
 void removeFilesOfType(const std::filesystem::path& dir, const std::string& extension) {
     for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
         if (entry.is_regular_file() && entry.path().extension() == extension) {
@@ -73,6 +82,7 @@ void removeFilesOfType(const std::filesystem::path& dir, const std::string& exte
         }
     }
 }
+
 
 int main(int argc, char**argv)
 {
@@ -109,8 +119,7 @@ int main(int argc, char**argv)
 
     CompilerOptionEntry compilerOptions[]
     {
-        CompilerOptionEntry(CompilerOptionName::PreserveParameters,CompilerOptionValue(CompilerOptionValueKind::Int,true)),
-        CompilerOptionEntry(CompilerOptionName::EmitReflectionJSON,CompilerOptionValue(CompilerOptionValueKind::Int,true))
+        CompilerOptionEntry(CompilerOptionName::PreserveParameters,CompilerOptionValue(CompilerOptionValueKind::Int,true))
     };
 
     SessionDesc sessionDesc{};
@@ -128,7 +137,6 @@ int main(int argc, char**argv)
     sessionDesc.compilerOptionEntries = compilerOptions;
     sessionDesc.compilerOptionEntryCount = sizeof(compilerOptions)/sizeof(CompilerOptionEntry);
 
-
     Slang::ComPtr<ISession> session;
     globalSession->createSession(sessionDesc, session.writeRef());
     std::vector<IModule*> modules;
@@ -139,7 +147,7 @@ int main(int argc, char**argv)
         return EXIT_FAILURE;
     }
 
-    std::unordered_map<std::string,std::vector<ShaderOutData>> shaderWriteData;
+    std::unordered_map<std::string,ShaderFileData> shaderWriteData;
     for (auto i=0; i< modules.size(); i++)
     {
         auto module = modules[i];
@@ -147,15 +155,39 @@ int main(int argc, char**argv)
         file = absolute(file);
         auto relative = std::filesystem::relative(file,root).replace_extension(".cshdr");
 
+        auto reflection = module->getModuleReflection();
+        auto layout = module->getLayout();
+        auto parameterCount = layout->getParameterCount();
+
+        std::vector<DescriptorSet> descriptorSets;
+
+        for (auto i=0; i<parameterCount; i++)
+        {
+            auto parameter = layout->getParameterByIndex(i);
+            auto paramType = parameter->getType();
+            auto paramKind = paramType->getKind();
+            if (paramKind == TypeReflection::Kind::ParameterBlock)
+            {
+                auto paramName = parameter->getName();
+                auto bindIndex = parameter->getBindingIndex();
+                auto paramLayout = parameter->getTypeLayout();
+
+                auto blockTypeLayout = paramLayout->getElementTypeLayout();
+
+                descriptorSets.push_back(DescriptorSet(paramName,blockTypeLayout,descriptorSets.size()));
+            }
+
+        }
+
 
         if (shaderWriteData.contains(relative.string()))
         {
             std::cerr << "Shader is duplicating relative file path: "<< file << std::endl;
             return EXIT_FAILURE;
         }
-
-        auto insertData = shaderWriteData.insert({relative.string(),{}});
-        auto& stages = insertData.first->second;
+        auto insertData = shaderWriteData.insert({relative.string(),ShaderFileData{}});
+        auto& sfd = insertData.first->second;
+        sfd.descriptorSets=descriptorSets;
 
         for (auto entryPointIndex = 0; entryPointIndex < module->getDefinedEntryPointCount(); entryPointIndex++)
         {
@@ -277,7 +309,8 @@ int main(int argc, char**argv)
                 return EXIT_FAILURE;
             }
             diagnostics = nullptr;
-            stages.push_back({.stage = stageName,.parameters = std::move(parameters),.spirvCode = spirv});
+
+            sfd.shaderOutData.push_back({.stage = stageName,.parameters = std::move(parameters),.spirvCode = spirv});
         }
 
     }
@@ -295,9 +328,49 @@ int main(int argc, char**argv)
         data.push_back('d');
         data.push_back('r');
         data.push_back('\n');
-        for (auto stageIndex=0; stageIndex<writeData.size(); ++stageIndex)
+        uint8_t descriptorGroupCount = writeData.descriptorSets.size();
+        if constexpr (std::endian::native == std::endian::big)
         {
-            auto& stage = writeData[stageIndex];
+            boost::endian::native_to_little_inplace(descriptorGroupCount);
+        }
+        data.push_back(*(char*)(&descriptorGroupCount));
+        for (auto i=0; i< writeData.descriptorSets.size(); ++i)
+        {
+            auto& descriptorSet = writeData.descriptorSets[i];
+            uint8_t descriptorCount = descriptorSet.descriptorCount();
+            boost::endian::native_to_little_inplace(descriptorCount);
+            data.push_back(*(char*)(&descriptorCount));
+            for (auto j=0; j< descriptorSet.descriptorCount(); ++j)
+            {
+                auto& descriptor = descriptorSet.at(j);
+                for (auto k=0; k< descriptor.name.size(); ++k)
+                {
+                    data.push_back(*(char*)(&descriptor.name[k]));
+                }
+                data.push_back('\0');
+                uint32_t index = descriptor.index;
+                boost::endian::native_to_little_inplace(index);
+                for (int k=0; k<sizeof(uint32_t); ++k)
+                {
+                    data.push_back(*(((char*)&index)+k));
+                }
+                //write type
+                uint8_t type = descriptor.type;
+                boost::endian::native_to_little_inplace(type);
+                data.push_back(*(char*)(&type));
+                //write count
+                uint32_t count = descriptor.count;
+                boost::endian::native_to_little_inplace(count);
+                for (int k=0; k<sizeof(uint32_t); ++k)
+                {
+                    data.push_back(*(((char*)&count)+k));
+                }
+            }
+        }
+
+        for (auto stageIndex=0; stageIndex<writeData.shaderOutData.size(); ++stageIndex)
+        {
+            auto& stage = writeData.shaderOutData[stageIndex];
             for (auto i=0; i<stage.stage.size(); ++i)
             {
                 data.push_back(stage.stage[i]);
@@ -500,50 +573,57 @@ std::vector<std::string> getGeometryParameters(FunctionReflection* reflection)
 bool getFragmentParameters(FunctionReflection* reflection, std::vector<std::string>& parameters, const std::filesystem::path& currentFile)
 {
     auto attributeCount = reflection->getUserAttributeCount();
+    std::unordered_map<uint8_t,std::string> colorTargets;
+    std::string depthTarget="";
+    bool foundDepth = false;
     if (attributeCount)
     {
+
         for (auto i = 0; i < attributeCount; i++)
         {
             auto attribute = reflection->getUserAttributeByIndex(i);
-            if (attribute->getName()=="targets")
+            std::string attributeName = attribute->getName();
+            if (attributeName=="OutputColorTarget")
             {
-                auto argCount = attribute->getArgumentCount();
-                bool foundDepth = false;
-                for (auto j = 0; j < argCount; j++)
+                int index = 0;
+                auto v = attribute->getArgumentValueInt(0,&index);
+                int type = 0;
+                attribute->getArgumentValueInt(1,&type);
+                auto target = TexelText[(TexelFormat)type];
+                colorTargets[index] = target;
+            }
+            else if (attributeName=="OutputDepthTarget")
+            {
+                if (!foundDepth)
                 {
-                    size_t size = 0;
-                    auto targetPointer = attribute->getArgumentValueString(j,&size);
-                    std::string target(targetPointer,size);
-                    if (isValidColorTarget(target))
-                    {
-                        parameters.push_back(target);
-                    }
-                    else if (isValidDepthTarget(target))
-                    {
-                        if (!foundDepth)
-                        {
-                            foundDepth = true;
-                            parameters.push_back(target);
-                        }
-                        else
-                        {
-                            std::cerr << "Multiple Depth targets defined for fragment stage: "<<currentFile<<"\n";
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        std::cerr << "Unknown target format defined in fragment stage ("<<target<<"): " << currentFile<<"\n";
-                        return false;
-                    }
+                    foundDepth = true;
                 }
+                else
+                {
+                    std::cerr << "Multiple Depth targets defined for fragment stage: "<<currentFile<<"\n";
+                    return false;
+                }
+                int type = 0;
+                attribute->getArgumentValueInt(0,&type);
+                depthTarget = TexelText[(TexelFormat)type];
             }
         }
     }
-    else
+    if (colorTargets.size()==0&&!foundDepth)
     {
         parameters.push_back("R8G8B8A8_UNORM");
         parameters.push_back("D32_FLOAT");
+    }
+    else
+    {
+        for (auto& kvPair: colorTargets)
+        {
+            parameters.push_back(kvPair.second);
+        }
+        if (foundDepth)
+        {
+            parameters.push_back(depthTarget);
+        }
     }
     return true;
 }
